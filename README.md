@@ -5,7 +5,8 @@ This repository contains a Branch Protection Azure Pipeline that:
 - Only runs for Pull Requests
 - Checks any `azure-pipeline*.[yaml|yml]` file in the repo
 - Compares the source and target branch file contents
-- Errors out when target file doesn't match to the source file.
+- Errors out when target file doesn't match to the source file
+- Displays accurate messages to how to fix the issue
 
 ## Why do this?
 
