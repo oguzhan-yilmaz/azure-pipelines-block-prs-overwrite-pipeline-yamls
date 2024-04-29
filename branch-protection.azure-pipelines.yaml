@@ -1,0 +1,71 @@
+# trigger: 
+#   - master
+
+# Build Number
+name: 1.0.$(Rev:r)
+
+stages:
+  - stage: DoNotOverridePipelinesYamlFilesOnPR
+    jobs:
+      - job: Do_Not_Override_Pipelines_Yaml_Files_on_PR
+        pool: "---insert--your--pool--name---"
+        # Only run this pipeline for Pull Request source events
+        # Normal pushes to target branch will not have source and target branches 
+        condition: ne(variables['System.PullRequest.PullRequestId'], '')
+        steps:
+        - checkout: self # Manually checkout repository
+          fetchDepth: 0 # do a full clone, avoid shallow clone
+
+        - script: |
+            # Find all azure-pipeline*.yml|yaml files
+            pipeline_files=$(find . -type f \( -name "azure-pipelines*.yaml" -o -name "azure-pipelines*.yml" \))
+            
+            ABORT_THE_PIPELINE="false"
+            
+            for pipeline_filepath in $pipeline_files; do
+                AZURE_PIPELINE_YAML_FILEPATH="${pipeline_filepath#"./"}" # remove leading ./ from rel filepaths
+
+                SOURCE_BRANCH="origin/${SYSTEM_PULLREQUEST_SOURCEBRANCH##*/}"
+                TARGET_BRANCH="origin/${SYSTEM_PULLREQUEST_TARGETBRANCH##*/}"
+
+                SOURCE_FILE_STR="$SOURCE_BRANCH($AZURE_PIPELINE_YAML_FILEPATH)"
+                TARGET_FILE_STR="$TARGET_BRANCH($AZURE_PIPELINE_YAML_FILEPATH)"
+
+                echo "Pull Request: Source branch: $SOURCE_BRANCH -- Target branch: $TARGET_BRANCH"
+                echo "Comparing $SOURCE_FILE_STR and $TARGET_FILE_STR files"
+                
+                # using git show to get the contents of files in any branch
+                SOURCE_FILE_CONTENT=$(git show $SOURCE_BRANCH:$AZURE_PIPELINE_YAML_FILEPATH)
+                TARGET_FILE_CONTENT=$(git show $TARGET_BRANCH:$AZURE_PIPELINE_YAML_FILEPATH)
+
+                # echo "SOURCE_FILE_CONTENT $SOURCE_FILE_STR:"
+                # echo "$SOURCE_FILE_CONTENT"
+                # echo "*-*-*-"
+                # echo "TARGET_FILE_CONTENT $TARGET_FILE_STR:"
+                # echo "$TARGET_FILE_CONTENT"
+                # echo "*-*-*-"
+
+                SOURCE_SHASUM=$(echo -n "$SOURCE_FILE_CONTENT" | shasum -a 256)
+                TARGET_SHASUM=$(echo -n "$TARGET_FILE_CONTENT" | shasum -a 256)
+
+                echo "SOURCE File SHASUM: $SOURCE_SHASUM"
+                echo "TARGET File SHASUM: $TARGET_SHASUM"
+
+                if [ "$SOURCE_SHASUM" == "$TARGET_SHASUM" ]; then
+                    echo "SHASUMs are equal, all good."
+                else
+                    echo "SHASUMs are not equal. Update your $SOURCE_FILE_STR file with the newer contents of $TARGET_FILE_STR."
+                    echo "##vso[task.logissue type=error]ERROR: Since this PullRequest has opened, $TARGET_FILE_STR file changed in the target branch.";
+                    echo "##vso[task.logissue type=error]FIX: Update your $SOURCE_FILE_STR file, with the newer contents of the $TARGET_FILE_STR file.";
+
+                    ABORT_THE_PIPELINE="true"
+                fi
+
+            done
+
+            if [[ "$ABORT_THE_PIPELINE" == "true" ]]; then
+              echo "Aborting.."
+              exit 1
+            fi
+            
+          displayName: "Do Not Override AzurePipelines yaml files on PR"
